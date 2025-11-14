@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Workout Tracker</title>
+    <style>
+        /* All the same CSS styles from before... */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f0f0f0; color: #333; margin: 0; padding: 15px;
+        }
+        .container {
+            max-width: 600px; margin: 0 auto; background-color: #fff;
+            border-radius: 10px; padding: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .btn {
+            display: block; width: 100%; padding: 15px; font-size: 1.1em;
+            font-weight: bold; color: #fff; border: none; border-radius: 8px;
+            cursor: pointer; margin-bottom: 15px;
+        }
+        .btn-primary { background-color: #007aff; }
+        .btn-secondary { background-color: #5ac8fa; }
+        .btn-success { background-color: #34c759; }
+        .btn-danger { background-color: #ff3b30; }
+        .btn-small {
+            padding: 8px 12px; font-size: 0.9em; width: auto;
+            display: inline-block; margin-top: 10px;
+        }
+        input[type="text"], input[type="number"] {
+            width: calc(100% - 20px); padding: 10px; margin-bottom: 10px;
+            border: 1px solid #ddd; border-radius: 5px; font-size: 1em;
+        }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        label { font-weight: 600; display: block; margin-bottom: 5px; }
+        #new-workout-section { display: none; }
+        .exercise-card {
+            background-color: #f9f9f9; border: 1px solid #eee; border-radius: 8px;
+            padding: 15px; margin-bottom: 15px;
+        }
+        .exercise-card h3 { margin-top: 0; color: #007aff; }
+        .set-log-list li {
+            background-color: #fff; padding: 8px 10px; border-radius: 5px;
+            margin-bottom: 5px; border: 1px solid #eee; font-size: 0.95em;
+        }
+        ul { list-style-type: none; padding-left: 0; }
+        #past-workouts-list { margin-top: 20px; }
+        .past-workout-summary {
+            background-color: #fff; border: 1px solid #ddd; border-radius: 8px;
+            padding: 15px; margin-bottom: 10px; cursor: pointer;
+        }
+        .past-workout-summary h3 { margin-top: 0; }
+        .past-workout-detail { display: none; padding-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>My Workout Tracker</h2>
+        
+        <button id="start-workout-btn" class="btn btn-primary" onclick="startNewWorkout()">
+            Log New Workout
+        </button>
+
+        <div id="new-workout-section">
+            <h2 id="current-workout-date"></h2>
+            <div id="current-exercises-list"></div>
+            <div class="exercise-card">
+                <h3>Add a New Exercise</h3>
+                <label for="exercise-name">Exercise Name:</label>
+                <input type="text" id="exercise-name" placeholder="e.g., Kettlebell Swings">
+                <button class="btn btn-secondary" onclick="addExercise()">Add Exercise</button>
+            </div>
+            <button class="btn btn-success" onclick="saveWorkout()">Finish & Save Workout</button>
+            <button class="btn btn-danger" onclick="cancelWorkout()">Cancel Workout</button>
+        </div>
+
+        <div id="past-workouts-section">
+            <h3>Past Workouts</h3>
+            <div id="past-workouts-list"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentWorkout = null; 
+
+        // === 1. Starting the App ===
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPastWorkouts(); // Load workouts from the server
+        });
+
+        // --- All the functions for startNewWorkout(), addExercise(), 
+        // --- and addSetGroup() are IDENTICAL to the previous code.
+        // --- (Copy them from the previous response or here)
+        
+        function startNewWorkout() {
+            document.getElementById('start-workout-btn').style.display = 'none';
+            document.getElementById('new-workout-section').style.display = 'block';
+            const now = new Date();
+            currentWorkout = {
+                id: now.getTime(), 
+                date: now.toLocaleString(),
+                exercises: []
+            };
+            document.getElementById('current-workout-date').innerText = `Workout: ${currentWorkout.date}`;
+            document.getElementById('current-exercises-list').innerHTML = '';
+        }
+
+        function addExercise() {
+            const exerciseNameInput = document.getElementById('exercise-name');
+            const exerciseName = exerciseNameInput.value.trim();
+            if (exerciseName === "") { alert("Please enter an exercise name."); return; }
+            const exerciseId = 'ex-' + Math.random().toString(36).substr(2, 9);
+            const newExercise = { name: exerciseName, id: exerciseId, setGroups: [] };
+            currentWorkout.exercises.push(newExercise);
+            const exerciseListDiv = document.getElementById('current-exercises-list');
+            const card = document.createElement('div');
+            card.className = 'exercise-card';
+            card.id = `card-${exerciseId}`;
+            card.innerHTML = `
+                <h3>${exerciseName}</h3>
+                <div class="form-grid">
+                    <div><label for="weight-${exerciseId}">Weight (lbs):</label><input type="number" id="weight-${exerciseId}" placeholder="e.g., 53"></div>
+                    <div><label for="sets-${exerciseId}"># of Sets:</label><input type="number" id="sets-${exerciseId}" placeholder="e.g., 3"></div>
+                    <div><label for="reps-${exerciseId}"># of Reps:</label><input type="number" id="reps-${exerciseId}" placeholder="e.g., 10"></div>
+                    <div><label for="rest-${exerciseId}">Rest (sec):</label><input type="number" id="rest-${exerciseId}" placeholder="e.g., 60"></div>
+                </div>
+                <button class="btn btn-small btn-primary" onclick="addSetGroup('${exerciseId}')">Add Set Group</button>
+                <ul id="list-${exerciseId}" class="set-log-list"></ul>
+            `;
+            exerciseListDiv.appendChild(card);
+            exerciseNameInput.value = '';
+        }
+
+        function addSetGroup(exerciseId) {
+            const exercise = currentWorkout.exercises.find(ex => ex.id === exerciseId);
+            if (!exercise) return;
+            const weight = document.getElementById(`weight-${exerciseId}`).value;
+            const sets = document.getElementById(`sets-${exerciseId}`).value;
+            const reps = document.getElementById(`reps-${exerciseId}`).value;
+            const rest = document.getElementById(`rest-${exerciseId}`).value;
+            if (weight === "" || sets === "" || reps === "") {
+                alert("Please fill in at least Weight, Sets, and Reps."); return;
+            }
+            const setGroup = {
+                weight: parseFloat(weight),
+                sets: parseInt(sets),
+                reps: parseInt(reps),
+                rest: rest ? parseInt(rest) : 0
+            };
+            exercise.setGroups.push(setGroup);
+            const setList = document.getElementById(`list-${exerciseId}`);
+            const listItem = document.createElement('li');
+            listItem.innerText = `${setGroup.sets} set(s) x ${setGroup.reps} reps @ ${setGroup.weight} lbs`;
+            if (setGroup.rest > 0) { listItem.innerText += ` (${setGroup.rest}s rest)`; }
+            setList.appendChild(listItem);
+            document.getElementById(`weight-${exerciseId}`).value = '';
+            document.getElementById(`reps-${exerciseId}`).value = '';
+            document.getElementById(`rest-${exerciseId}`).value = '';
+            document.getElementById(`weight-${exerciseId}`).focus();
+        }
+
+        function cancelWorkout() {
+            if (confirm("Are you sure you want to cancel this workout? All progress will be lost.")) {
+                resetNewWorkoutForm();
+            }
+        }
+
+        function resetNewWorkoutForm() {
+            currentWorkout = null;
+            document.getElementById('new-workout-section').style.display = 'none';
+            document.getElementById('current-exercises-list').innerHTML = '';
+            document.getElementById('exercise-name').value = '';
+            document.getElementById('start-workout-btn').style.display = 'block';
+        }
+        
+        // ===================================================
+        // === 4. Saving and Loading (THE UPDATED PARTS) ===
+        // ===================================================
+
+        async function saveWorkout() {
+            if (currentWorkout.exercises.length === 0) {
+                alert("Please log at least one exercise before saving.");
+                return;
+            }
+
+            try {
+                // 'fetch' sends our 'currentWorkout' object to our Python server's API
+                const response = await fetch('/api/save_workout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(currentWorkout) // Convert object to JSON string
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert("Workout saved successfully!");
+                    resetNewWorkoutForm();
+                    loadPastWorkouts(); // Reload the list
+                } else {
+                    alert("Error saving workout.");
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Could not connect to the server. Is it running?");
+            }
+        }
+
+        async function loadPastWorkouts() {
+            const listDiv = document.getElementById('past-workouts-list');
+            listDiv.innerHTML = '<p>Loading workouts...</p>';
+
+            try {
+                // 'fetch' asks our Python server for all the saved workouts
+                const response = await fetch('/api/get_workouts');
+                const allWorkouts = await response.json(); // Gets the list of workouts
+
+                listDiv.innerHTML = ''; // Clear "Loading..."
+
+                if (allWorkouts.length === 0) {
+                    listDiv.innerHTML = '<p>You have no saved workouts.</p>';
+                    return;
+                }
+
+                // This part is the same as before. It just loops over the
+                // data (which now comes from the server) and builds HTML.
+                allWorkouts.forEach(workout => {
+                    const workoutEl = document.createElement('div');
+                    let summaryHTML = `
+                        <div class="past-workout-summary" onclick="toggleWorkoutDetail('${workout.id}')">
+                            <h3>Workout: ${workout.date}</h3>
+                            <p>${workout.exercises.length} exercises logged. Click to see details.</p>
+                        </div>
+                    `;
+                    let detailHTML = `<div class="past-workout-detail" id="detail-${workout.id}">`;
+                    workout.exercises.forEach(ex => {
+                        detailHTML += `<h4>${ex.name}</h4><ul>`;
+                        ex.setGroups.forEach(sg => {
+                            detailHTML += `<li>${sg.sets} set(s) x ${sg.reps} reps @ ${sg.weight} lbs (${sg.rest || 0}s rest)</li>`;
+                        });
+                        detailHTML += `</ul>`;
+                    });
+                    detailHTML += `</div>`;
+                    workoutEl.innerHTML = summaryHTML + detailHTML;
+                    listDiv.appendChild(workoutEl);
+                });
+            } catch (error) {
+                console.error("Error:", error);
+                listDiv.innerHTML = '<p>Could not load workouts. Is the server running?</p>';
+            }
+        }
+
+        function toggleWorkoutDetail(workoutId) {
+            const detailDiv = document.getElementById(`detail-${workoutId}`);
+            if (detailDiv.style.display === 'block') {
+                detailDiv.style.display = 'none';
+            } else {
+                detailDiv.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>
