@@ -1,44 +1,45 @@
 import sqlite3
 import json
+import os
 from flask import Flask, render_template, request, jsonify, g
 
 # --- Configuration ---
 app = Flask(__name__)
+# The database file used for local development (SQLite)
 DATABASE = 'workouts.db'
 
 # --- Database Helper Functions ---
 
-# Gets the database connection (or creates one)
-def get_db():
-    db = getattr(g, '_database', None)
+# Helper to connect to the SQLite database
+def get_sqlite_db():
+    db = getattr(g, '_sqlite_database', None)
     if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-        # This makes the database return dictionaries, which is very helpful
+        db = g._sqlite_database = sqlite3.connect(DATABASE)
+        # This makes the database return dictionary-like rows
         db.row_factory = sqlite3.Row
     return db
+
+# Gets the database connection (or creates one)
+def get_db():
+    """
+    Checks for a PostgreSQL URL (used in production) or falls back to SQLite (local dev).
+    For now, since the app uses raw sqlite3 commands, we MUST fall back to SQLite.
+    A future version (with SQLAlchemy) would handle PostgreSQL here.
+    """
+    return get_sqlite_db()
 
 # Closes the database connection at the end of the request
 @app.teardown_appcontext
 def close_connection(exception):
-    db = getattr(g, '_database', None)
-    # FIX: Changed 'is not in None' to the correct Python syntax 'is not None'
+    db = getattr(g, '_sqlite_database', None)
     if db is not None:
         db.close()
 
 # --- One-Time Database Setup ---
 
 # A function to create our database tables
-def init_db():
-    with app.app_context():
-        db = get_db()
-        with app.open_resource('schema.sql', mode='r') as f:
-            db.cursor().executescript(f.read())
-        db.commit()
-
-# We need a 'schema.sql' file for the command above. 
-# OR, to make it simple, let's just put the SQL right in the function.
-# (This is simpler for you)
 def simple_init_db():
+    """Initializes the SQLite database with the 'workouts' table."""
     sql_command = """
     CREATE TABLE IF NOT EXISTS workouts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,35 +47,36 @@ def simple_init_db():
         workout_json TEXT NOT NULL
     );
     """
-    db = sqlite3.connect(DATABASE)
-    cursor = db.cursor()
-    cursor.execute(sql_command)
-    db.commit()
-    db.close()
-    print("Database initialized!")
+    try:
+        with app.app_context():
+            db = get_db()
+            db.cursor().executescript(sql_command)
+            db.commit()
+    except Exception as e:
+        # This will catch errors if the table already exists, which is fine
+        print(f"Database initialization failed: {e}")
 
-# Add a terminal command to run this setup
-@app.cli.command('init-db')
-def init_db_command():
-    """Clears the existing data and creates new tables."""
-    simple_init_db()
-    print('Initialized the database.')
+# Call the init function once when the app starts
+simple_init_db()
 
-# === API Endpoints (The "Brain") ===
 
-# 1. The Main Page (Serves your app)
+# --- Routes ---
+
+# 1. The main entry point route
 @app.route('/')
 def index():
-    """Serves the main index.html file to your phone's browser."""
+    """Renders the main HTML page."""
     return render_template('index.html')
 
-# 2. The API for getting workouts
-@app.route('/api/get_workouts', methods=['GET'])
-def get_workouts():
-    """Fetches all workouts from the DB and returns them as JSON."""
+# 2. The API for loading all past workouts
+@app.route('/api/load_workouts', methods=['GET'])
+def load_workouts():
+    """Loads all saved workouts from the DB and returns them as a JSON list."""
+    
     db = get_db()
-    cursor = db.execute('SELECT * FROM workouts ORDER BY id DESC')
-    rows = cursor.fetchall()
+    
+    # Select all rows
+    rows = db.execute('SELECT id, date_text, workout_json FROM workouts ORDER BY date_text DESC').fetchall()
     
     all_workouts = []
     for row in rows:
@@ -83,8 +85,11 @@ def get_workouts():
         workout_data = json.loads(row['workout_json'])
         
         # We ensure the original ID and Date are used
-        workout_data['id'] = row['id']
-        workout_data['date'] = row['date_text']
+        workout_data = {
+            'id': row['id'],
+            'date': row['date_text'],
+            **workout_data  # Merge the JSON contents into the main object
+        }
         all_workouts.append(workout_data)
         
     return jsonify(all_workouts)
@@ -92,7 +97,7 @@ def get_workouts():
 # 3. The API for saving a workout
 @app.route('/api/save_workout', methods=['POST'])
 def save_workout():
-    """Receives workout data (as JSON) from the phone and saves it to the DB."""
+    """Receives workout data (as JSON) from the client and saves it to the DB."""
     
     # Get the JSON object sent from the front-end
     workout_data = request.get_json()
@@ -105,17 +110,30 @@ def save_workout():
     
     # Insert into the database
     db = get_db()
-    db.execute(
+    cursor = db.execute(
         'INSERT INTO workouts (date_text, workout_json) VALUES (?, ?)',
         (date_text, workout_json)
     )
     db.commit()
     
-    return jsonify({"success": True, "message": "Workout saved!"})
+    # Return the new ID back to the client
+    new_id = cursor.lastrowid
+    
+    return jsonify({"success": True, "id": new_id})
+
+# 4. The API for deleting a workout
+@app.route('/api/delete_workout/<int:workout_id>', methods=['DELETE'])
+def delete_workout(workout_id):
+    """Deletes a workout by its ID."""
+    
+    db = get_db()
+    db.execute('DELETE FROM workouts WHERE id = ?', (workout_id,))
+    db.commit()
+    
+    return jsonify({"success": True})
 
 
-# --- Run the App ---
 if __name__ == '__main__':
-    # 'host="0.0.0.0"' is CRITICAL. 
-    # It makes the server accessible on your network, not just on your computer.
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # When running locally, Flask uses this function.
+    # When deployed, Gunicorn takes over and ignores this block.
+    app.run(debug=True)
